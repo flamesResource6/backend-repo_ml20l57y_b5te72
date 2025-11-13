@@ -1,8 +1,11 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
+from database import db, create_document, get_documents
 
-app = FastAPI()
+app = FastAPI(title="Portfolio API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,11 +17,79 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello from FastAPI Backend!"}
+    return {"message": "Portfolio Backend Running"}
 
-@app.get("/api/hello")
-def hello():
-    return {"message": "Hello from the backend API!"}
+# Public APIs for the portfolio website
+
+# Schemas for request bodies
+class ContactRequest(BaseModel):
+    name: str
+    email: str
+    subject: str
+    body: str
+
+@app.get("/api/profile")
+async def get_profile():
+    try:
+        items = get_documents("profile", {}, limit=1)
+        if not items:
+            # Provide a sensible default if no profile yet
+            return {
+                "name": "Nama Anda",
+                "title": "Software Developer",
+                "bio": "Saya membangun aplikasi web modern yang cepat dan elegan.",
+                "location": "Indonesia",
+                "avatar_url": None,
+                "email": None,
+                "socials": {
+                    "github": "https://github.com/",
+                    "linkedin": "https://linkedin.com/in/"
+                }
+            }
+        item = items[0]
+        item["_id"] = str(item.get("_id"))
+        return item
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/projects")
+async def get_projects():
+    try:
+        items = get_documents("project", {"featured": True})
+        # Normalize ids for frontend
+        for it in items:
+            it["_id"] = str(it.get("_id"))
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/experience")
+async def get_experience():
+    try:
+        items = get_documents("experience")
+        for it in items:
+            it["_id"] = str(it.get("_id"))
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/skills")
+async def get_skills():
+    try:
+        items = get_documents("skill")
+        for it in items:
+            it["_id"] = str(it.get("_id"))
+        return items
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/contact")
+async def post_contact(payload: ContactRequest):
+    try:
+        _id = create_document("message", payload.model_dump())
+        return {"status": "ok", "id": _id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test")
 def test_database():
@@ -31,39 +102,23 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
     try:
-        # Try to import database module
-        from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
+            response["database_name"] = getattr(db, 'name', None) or "✅ Connected"
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
     return response
-
 
 if __name__ == "__main__":
     import uvicorn
